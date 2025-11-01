@@ -15,6 +15,10 @@ AI workflow to for gaining insights into the eudamed database
 
 ## HOW TO RUN THE PROGRAM
 Open mac terminal and type:
+
+Prerequisites: 
+- Put ´GEMINI_API_KEY´as variable in .zshrc file 
+
 1. ```make activate```
 2. ```make run```
 

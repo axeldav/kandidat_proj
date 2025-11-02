@@ -13,15 +13,19 @@ AI workflow to for gaining insights into the eudamed database
 5. Return back answer to user with references to legal documentation.
 
 
+## Prerequisites: 
+- If you dont have .zshrc file, then create on in your user root folder
+- Put ´GEMINI_API_KEY´as variable in .zshrc file
+- Restart terminal och or source the .zshrc file 
+ALSO:
+- if you dont have python on your computer, then install python3.12 (is best i think)
+    - i like to use homebrew(brew), google how to install brew.
+    - then install python3.12 via brew (google this also)
+
 ## HOW TO RUN THE PROGRAM
 Open mac terminal and type:
-
-Prerequisites: 
-- Put ´GEMINI_API_KEY´as variable in .zshrc file 
-
 1. ```make activate```
 2. ```make run```
-
 
 
 ## Other information

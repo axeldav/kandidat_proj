@@ -58,5 +58,6 @@ def get_specific_device(deviceId='121f9fdc-197a-4a4e-a415-b5d80b54a8fe', languag
     return data
 
 if __name__ == "__main__":
-    #fuzzy_search()
-    get_specific_device()
+    fuzzy_search()
+    #get_specific_device()
+    

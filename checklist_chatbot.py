@@ -10,14 +10,16 @@ How the tool calling workflow works:
 """
 
 import os
+import json
 import google.generativeai as genai
-from utils import parts_to_text
+from utils import parts_to_text, load_mdr_rules
 from tool_calling import (
     is_checklist_complete,
     record_answers,
     CHECK_LIST,
     TOOLS)
 
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def build_system_prompt(checklist):
     questions = "\n".join(f"- {v['question']}" for v in checklist.values())
@@ -71,10 +73,9 @@ def chat_with_llm(model, user_message, checklist, history):
     return text_out
 
 
-def main():
+def gather_info():
 
     #1. The app sends system instructions + tools to gemini
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash",
         system_instruction=build_system_prompt(CHECK_LIST)
@@ -85,6 +86,7 @@ def main():
     print(f"Chatbot: {llm_response} \n")
 
     while not is_checklist_complete(CHECK_LIST):
+
         user_input = input("You: ").strip()
         if not user_input:
             continue
@@ -100,5 +102,31 @@ def main():
     for k, v in CHECK_LIST.items():
         print(f"{v['question']} => {v['answer']}")
 
+
+def classify():
+    classifier_model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash",
+    system_instruction="""
+    You are a medical device classification (MDR) expert.
+    Your Task is to classicate a medical device based on its characteristics and the MDR Classification Rules.
+    You are allowed to structure data and use the rules to classify.
+    """
+    )
+
+    classification_result = classifier_model.generate_content(
+    f"""
+    Device characteristics:
+    {json.dumps(CHECK_LIST, indent=2)}
+    
+    MDR Classification Rules:
+    {load_mdr_rules()}
+    
+    Classify the device based on its characteristics and the MDR Classification Rules.
+    """
+    )
+
+    print(classification_result)
+
 if __name__ == "__main__":
-    main()
+    gather_info()
+    classify()

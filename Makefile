@@ -24,5 +24,5 @@ clean:
 	@rm -rf $(VENV_DIR)
 
 activate: venv
-	@echo "Starting zsh with virtual environment activated..."
-	@zsh -c 'zsh -c "source ~/.zshrc 2>/dev/null || true; source $(VENV_DIR)/bin/activate; echo \"Virtual environment is now active!\"; exec zsh"'
+	@echo "Starting $(SHELL) with virtual environment activated..."
+	@$(SHELL) -ic '. "$(VENV_DIR)/bin/activate"; echo "Virtual environment is now active!"; exec $(SHELL)'

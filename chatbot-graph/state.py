@@ -120,47 +120,33 @@ class State(BaseModel):
 
     # --- COMMON FIELDS (Shared by Rules 9 & 10) ---
     
-    emits_ionizing_radiation: Optional[bool] = None # Rule 9 & 10: "intended to emit ionizing radiation..." -> Class IIb (Both Therapeutic and Diagnostic).
-    # ... (T.ex. Röntgen, CT, strålkanoner. Notera: Gäller ej synligt ljus).
+    emits_ionizing_radiation: Optional[bool] = None # Rule 9 & 10: "intended to emit ionizing radiation..." -> Class IIb (Both Therapeutic and Diagnostic) .... (T.ex. Röntgen, CT, strålkanoner. Notera: Gäller ej synligt ljus).
 
     # Rule 9: Active Therapeutic Devices (Energy & Control)
     # ... Gäller enheter som tillför energi eller styr andra enheter.
 
-    r9_administers_exchange_energy: Optional[bool] = None # "intended to administer or exchange energy... classified as class IIa"
-    # ... (T.ex. muskelstimulatorer, TENS, hörapparater, värmelampor).
-
-    r9_hazardous_energy_delivery: Optional[bool] = None # Exception: "...administer energy... in a potentially hazardous way -> Class IIb"
-    # ... (T.ex. kirurgisk laser, lungventilatorer, litotripsi).
-
-    r9_controls_active_class_iib: Optional[bool] = None # "intended to control or monitor... active therapeutic class IIb devices -> Class IIb"
-    # ... (T.ex. en kontrollenhet för en strålningsmaskin).
-
-    r9_controls_active_implantable: Optional[bool] = None # "intended for controlling, monitoring... active implantable devices -> Class III"
-    #... (T.ex. en programmerare för en pacemaker eller ICD. Mycket viktig regel!).
+    r9_administers_exchange_energy: Optional[bool] = None # "intended to administer or exchange energy... classified as class IIa"... (T.ex. muskelstimulatorer, TENS, hörapparater, värmelampor).
+    r9_hazardous_energy_delivery: Optional[bool] = None # Exception: "...administer energy... in a potentially hazardous way -> Class IIb"... (T.ex. kirurgisk laser, lungventilatorer, litotripsi).
+    r9_controls_active_class_iib: Optional[bool] = None # "intended to control or monitor... active therapeutic class IIb devices -> Class IIb" ... (T.ex. en kontrollenhet för en strålningsmaskin).
+    r9_controls_active_implantable: Optional[bool] = None # "intended for controlling, monitoring... active implantable devices -> Class III" ... (T.ex. en programmerare för en pacemaker eller ICD. Mycket viktig regel!).
 
     # Rule 10: Active Diagnostic Devices
     #... Gäller enheter för diagnos och övervakning.
     
     r10_monitors_vital_processes: Optional[bool] = None # "allow direct diagnosis or monitoring of vital physiological processes -> Class IIa"
-    
-    r10_immediate_danger_alert: Optional[bool] = None # Exception: "...variations... could result in immediate danger to the patient -> Class IIb"
-    # ... (T.ex. larm på en intensivvårdsmonitor).
-
-    r10_illuminates_body: Optional[bool] = None # "intended to illuminate the patient's body, in the visible spectrum -> Class I"
-    # ... (T.ex. undersökningslampor, pannlampor).
+    r10_immediate_danger_alert: Optional[bool] = None # Exception: "...variations... could result in immediate danger to the patient -> Class IIb" ... (T.ex. larm på en intensivvårdsmonitor).
+    r10_illuminates_body: Optional[bool] = None # "intended to illuminate the patient's body, in the visible spectrum -> Class I" ... (T.ex. undersökningslampor, pannlampor).
 
     # Rule 11: Software (Decision Making)
-    # ... Gäller fristående mjukvara eller mjukvara som driver en enhet.
+    #... Gäller fristående mjukvara eller mjukvara som driver en enhet.
     
-    software_decision_impact: Optional[str] = None # "Death or irreversible deterioration" -> III, "Serious deterioration/Surgical intervention" -> IIb, "Provide info" -> IIa.
+    r11_software_decision_impact: Optional[str] = None # "Death or irreversible deterioration" -> III, "Serious deterioration/Surgical intervention" -> IIb, "Provide info" -> IIa.
     
     # Rule 12: Active Administration of Substances
     # ... Gäller pumpar och liknande som flyttar medicin eller substanser.
     
-    active_drug_delivery: Optional[bool] = None # "administer and/or remove medicinal products... -> Class IIa"
-
-    active_drug_delivery_hazardous: Optional[bool] = None # Exception: "...in a manner that is potentially hazardous -> Class IIb"
-    # ... (T.ex. insulinpumpar, infusionspumpar för smärtlindring).
+    r12_active_drug_delivery: Optional[bool] = None # "administer and/or remove medicinal products... -> Class IIa"
+    r12_active_drug_delivery_hazardous: Optional[bool] = None # Exception: "...in a manner that is potentially hazardous -> Class IIb" ... (T.ex. insulinpumpar, infusionspumpar för smärtlindring).
 
     ######## --- 7. SPECIAL RULES (Rules 14-22) --- ########
     # Dessa "checkas" alltid i slutet då de gäller oavsett typ

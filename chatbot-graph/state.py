@@ -40,20 +40,20 @@ import operator
 
 class State(BaseModel):
     ####### --- CHAT CONTEXT ---  #######
-    # Lagrar historiken så LLM:en minns vad som sagts
+    # ... Lagrar historiken så LLM:en minns vad som sagts
     messages: Annotated[List[str], operator.add] = Field(default_factory=list)
 
     ####### --- TRIAGE (Vägval) --- #######
-    # Dessa två avgör hela flödet i grafen
+    # ... Dessa två avgör hela flödet i grafen
     is_active_device: Optional[bool] = None       # True = Gå till Active Questions
     invasive_type: Optional[InvasiveType] = None  # Bestämmer Non-invasive vs Invasive Questions
 
     ####### --- COMMON FIELDS --- #######
-    # Duration krävs för nästan alla invasiva regler (5-8)
+    # ... Duration krävs för nästan alla invasiva regler (5-8)
     duration: Optional[Duration] = None
 
     ####### --- NON-INVASIVE SPECIFICS (Rules 1-4) --- ####### 
-    # Fylls i om invasive_type == NON_INVASIVE
+    # ... Fylls i om invasive_type == NON_INVASIVE
 
     # Rule 1:
     # ... All non-invasive devices are classified as class I, unless one of the rules in rule 2 to rule 4 applies.
@@ -74,72 +74,46 @@ class State(BaseModel):
     
     # ... If this is false, skip all Rule 4 questions   
     r4_contact_injured_skin_mucosa_check: Optional[bool] = None  # "All non-invasive devices which come into contact with injured skin or mucous membrane..."
-
+    
     r4_mechanical_barrier_compression_absorption: Optional[bool] = None # " class I if they are intended to be used as a mechanical barrier, for compression or for absorption of exudates;"
-
     r4_breached_dermis_secondary_healing: Optional[bool] = None # "class IIb if they are intended to be used principally for injuries to skin which have breached the dermis or mucous membrane and can only heal by secondary intent;"
-
     r4_manages_micro_environment: Optional[bool] = None # "class IIa if they are principally intended to manage the micro-environment of injured skin or mucous membrane;"
 
-######## --- INVASIVE SPECIFICS (Rules 5-8) --- ########
+    ######## --- 5. INVASIVE SPECIFICS (Rules 5-8) --- ########
     # Fylls i om invasive_type != NON_INVASIVE
 
-    # --- Rule 5: Body Orifice (Not Surgically Invasive) ---
-    # Gäller om invasive_type == InvasiveType.BODY_ORIFICE
-    
-    r5_connected_to_active_class_IIa_or_higher: Optional[bool] = None 
-    # "intended for connection to a class IIa, class IIb or class III active device -> Class IIa"
-    
-    r5_oral_nasal_ear_specific: Optional[bool] = None 
-    # Exception: "...used in the oral cavity... ear canal... nasal cavity -> Class I (if transient)"
-    
-    r5_absorbed_by_mucous_membrane: Optional[bool] = None 
-    # Exception: "...and are not liable to be absorbed by the mucous membrane" (Replaces IIb with IIa for Long Term)
+    # ...COMMON FIELDS (Shared by Rules 5, 6, 7, 8)
+    central_circulatory_system: Optional[bool] = None  # Rule 6, 7, 8: "intended specifically for use in direct contact with the heart or central circulatory system -> Class III"
+    central_nervous_system: Optional[bool] = None  # Rule 6, 7, 8: "...or the central nervous system -> Class III"
+    teeth_placement: Optional[bool] = None  # Rule 5, 7, 8: Undantag. Ofta Class IIa (Dental) istället för IIb/III.
+    biological_effect_or_absorbed: Optional[bool] = None  # Rule 6, 7, 8: Om enheten absorberas eller har biologisk effekt. (Rule 6 -> Class IIb. Rule 7/8 -> Class III).
+    administers_medicines: Optional[bool] = None  # Rule 6, 7, 8: Administrering av läkemedel. (Rule 6 kräver att det är "hazardous" för att klassas upp, Rule 7/8 klassar upp direkt).
+    chemical_change: Optional[bool] = None  # Rule 7, 8: "intended to undergo chemical change in the body" -> Class IIb/III.
 
-    # --- Rule 6: Surgically Invasive & Transient (<60 min) ---
-    # Gäller om invasive_type == SURGICALLY_INVASIVE och duration == TRANSIENT
+    # Rule 5 (Body Orifice - Not Surgically Invasive)
+    # ... Gäller om invasive_type == InvasiveType.BODY_ORIFICE
+
+    r5_connected_to_active_class_IIa_or_higher: Optional[bool] = None  # "intended for connection to a class IIa... active device -> Class IIa"
+    r5_oral_nasal_ear_specific: Optional[bool] = None  # Exception: "...used in the oral cavity... ear canal... nasal cavity -> Class I (if transient)"
+    r5_absorbed_by_mucous_membrane: Optional[bool] = None  # Exception logic for Long Term: "...and are not liable to be absorbed by the mucous membrane"
+
+    # Rule 6 (Surgically Invasive & Transient)
+    # ... Gäller om invasive_type == SURGICALLY_INVASIVE och duration == TRANSIENT
     
-    r6_reusable_surgical_instrument: Optional[bool] = None
-    # "...are reusable surgical instruments, in which case they are classified as class I"
-    # (T.ex. skalpeller, sågar, borrar som rengörs och återanvänds)
+    r6_reusable_surgical_instrument: Optional[bool] = None  # "...are reusable surgical instruments, in which case they are classified as class I".
+    r6_supplies_ionizing_radiation: Optional[bool] = None  # "...intended to supply energy in the form of ionising radiation -> Class IIb"
+    r6_medicinal_delivery_hazardous: Optional[bool] = None  # Specifik nyans för Rule 6: Är administreringen POTENTIELLT FARLIG?  (Om 'administers_medicines' är True, kollar vi detta för Rule 6).
 
-    r6_supplies_ionizing_radiation: Optional[bool] = None
-    # "...intended to supply energy in the form of ionising radiation -> Class IIb"
-    # (Notera: Skiljer sig från Rule 9/10 då detta gäller själva 'proben' som är inne i kroppen)
+    # Rule 7 (Surgically Invasive & Short Term)
+    # ... (Mest täckt av Common fields, men här kan finnas unika variabler om nödvändigt)
+    # ... Just nu täcks allt av Common + Duration.
 
-    r6_biological_effect_or_absorbed: Optional[bool] = None
-    # "...have a biological effect or are wholly or mainly absorbed -> Class IIb"
+    # Rule 8 (Surgically Invasive & Long Term / Implantable) ---
+    # ...Gäller om invasive_type == IMPLANTABLE eller Duration == LONG_TERM
     
-    r6_medicinal_delivery_hazardous: Optional[bool] = None
-    # "...administer medicinal products ... in a manner that is potentially hazardous -> Class IIb"
-
-    # --- COMMON ANATOMY & PROPERTIES (Rules 6, 7, 8) ---
-    # Dessa fält används av Rule 6 (Transient), Rule 7 (Short-term) och Rule 8 (Long-term/Implant)
-    # Om någon av dessa är True triggar det oftast Class III.
-
-    central_circulatory_system: Optional[bool] = None 
-    # Rule 6, 7, 8: "intended specifically for use in direct contact with the heart or central circulatory system -> Class III"
-
-    central_nervous_system: Optional[bool] = None     
-    # Rule 6, 7, 8: "...or the central nervous system -> Class III"
-
-    # --- Rule 7 Specifics (Short Term) ---
-    # Rule 7 använder mest "Common"-fälten ovan + kemisk förändring
-    r7_chemical_change: Optional[bool] = None
-    # "intended to undergo chemical change in the body -> Class IIb (unless placed in teeth)"
-
-    # --- Rule 8 Specifics (Long Term / Implantable) ---
-    # Rule 8 använder "Common"-fälten ovan + specifika implantattyper
-    
-    r8_orthopaedic_implant_type: Optional[str] = None
-    # "total or partial joint replacements -> Class III", "spinal disc -> Class III"
-    # "ancillary components such as screws, wedges, plates -> Class IIb"
-    
-    r8_breast_implant_or_mesh: Optional[bool] = None
-    # "breast implants or surgical meshes -> Class III"
-    
-    r8_active_implantable: Optional[bool] = None
-    # "active implantable devices -> Class III"
+    r8_orthopaedic_implant_type: Optional[str] = None  # "total or partial joint replacements -> Class III", "spinal disc -> Class III" , "ancillary components such as screws, wedges, plates -> Class IIb"
+    r8_breast_implant_or_mesh: Optional[bool] = None  # "breast implants or surgical meshes -> Class III"
+    r8_active_implantable: Optional[bool] = None  # "active implantable devices -> Class III"
     
     # Rule 11 (Software)
     software_decision_impact: Optional[str] = None    # "Death", "Serious deterioration" eller "None"

@@ -6,7 +6,8 @@ from typing import List
 
 # --- Import from our new files ---
 from state import State, get_field_options
-from tools import ALL_TOOLS, handle_tool_call
+from utils import handle_tool_call
+from tools import TriageNode
 from prompts import build_triage_prompt
 
 # --- Configuration ---
@@ -16,7 +17,7 @@ model = genai.GenerativeModel("gemini-2.5-flash") # Use a modern model
 # This list *drives* the triage logic.
 # To add a new field, just add its name here!
 TRIAGE_FIELDS_ORDER: List[str] = [
-    "device_type",
+    "device_characteristics",
     "duration",
     "primary_purpose",
     "contact_scope",

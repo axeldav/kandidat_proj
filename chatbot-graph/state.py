@@ -42,11 +42,14 @@ class State(BaseModel):
     ####### --- CHAT CONTEXT ---  #######
     # ... Lagrar historiken så LLM:en minns vad som sagts
     messages: Annotated[List[str], operator.add] = Field(default_factory=list)
+    pending_nodes: List[str]
+    triage_complete: bool
 
     ####### --- TRIAGE (Vägval) --- #######
     # ... Dessa två avgör hela flödet i grafen
     is_active_device: Optional[bool] = None       # True = Gå till Active Questions
     invasive_type: Optional[InvasiveType] = None  # Bestämmer Non-invasive vs Invasive Questions
+    is_software: Optional[bool] = None
 
     ####### --- COMMON FIELDS --- #######
     # ... Duration krävs för nästan alla invasiva regler (5-8)

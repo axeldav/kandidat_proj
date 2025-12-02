@@ -1,174 +1,291 @@
 # app.py
 import os
-import google.generativeai as genai
+from pydantic import BaseModel
 from langgraph.graph import StateGraph, END
-from typing import List
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-# --- Import from our new files ---
-from state import State, get_field_options
-from utils import handle_tool_call
-from tools import TriageNode
-from prompts import build_triage_prompt
+from state import State
+from utils import calculate_pending_nodes
+from tools import TriageNode, InvasiveNode, ActiveNode, SoftwareNode
 
-# --- Configuration ---
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-2.5-flash") # Use a modern model
+# --- LLM ---
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=os.environ.get("GEMINI_API_KEY"),
+    temperature=0 
+)
 
-# This list *drives* the triage logic.
-# To add a new field, just add its name here!
-TRIAGE_FIELDS_ORDER: List[str] = [
-    "device_characteristics",
-    "duration",
-    "primary_purpose",
-    "contact_scope",
-    "contacts_critical_systems",
-]
+# ============================================================
+# NODE ENGINE
+# ============================================================
 
-# --- Nodes ---
+def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triage: bool = False) -> dict:
+    """Generic engine: Intent Check → (Clarify OR Extract) → Find Missing → Ask."""
+    print(f"\n[DEBUG] Running Node: {node_name.upper()}") 
+    
+    messages = state.messages
+    updates = {}
+    
+    user_input = ""
+    last_ai_msg = "None"
 
-def triage_node(state: State):
-    """
-    This node is now data-driven. It finds the next empty field
-    from TRIAGE_FIELDS_ORDER and asks about it.
-    """
-    user_msg = state["text"]
-    chat = model.start_chat(history=state["history"])
-    reply = ""
+    # --- SETUP CONTEXT ---
+    if messages and isinstance(messages[-1], HumanMessage):
+        user_input = messages[-1].content
+        if len(messages) > 1 and isinstance(messages[-2], AIMessage):
+            last_ai_msg = messages[-2].content
 
-    # Find the first field in our list that is still None
-    next_field_to_ask = None
-    for field in TRIAGE_FIELDS_ORDER:
-        if state.get(field) is None:
-            next_field_to_ask = field
-            break # Found the next field to ask
-
-    if next_field_to_ask:
-        # --- We still have questions to ask ---
-        print(f"[Flow] Triage needs field: {next_field_to_ask}")
-        options = get_field_options(next_field_to_ask)
-        prompt = build_triage_prompt(next_field_to_ask, options, user_msg)
+    # ============================================================
+    # STEP 1: CHECK INTENT (CLARIFICATION VS ANSWER)
+    # ============================================================
+    
+    is_clarification = False
+    
+    if user_input:
+        print(f"[DEBUG] Checking intent for input: '{user_input}'...")
         
-        llm_response = chat.send_message(prompt, tools=ALL_TOOLS)
-        reply = handle_tool_call(llm_response, chat, state)
-
-    else:
-        # --- All fields are filled! ---
-        print("[Flow] Triage complete.")
-        state["triage_done"] = True # Set the flag for our router
+        # We tell the model to be very strict with classification
+        intent_prompt = f"""
+        Analyze the conversation.
         
-        prompt = f"All information is collected. Confirm this with the user and tell them you will now analyze the results.\nUser's last message: {user_msg}"
-        llm_response = chat.send_message(prompt)
-        reply = llm_response.text.strip()
+        Bot asked: "{last_ai_msg}"
+        User replied: "{user_input}"
+        
+        Task: Determine if the User is answering the question OR asking for help/clarification.
+        
+        Return ONLY one word:
+        - "ANSWER" (if user provides info, says yes/no, or ignores the question)
+        - "CLARIFICATION" (if user asks "what do you mean?", "I don't understand", "define X")
+        """
+        
+        intent_result = llm.invoke(intent_prompt).content.strip().upper()
+        print(f"[DEBUG] Intent detected: {intent_result}")
+        
+        if "CLARIFICATION" in intent_result:
+            is_clarification = True
 
-    # Update history and return new state
-    new_history = state["history"] + [
-        {"role": "user",  "parts": [{"text": user_msg}]},
-        {"role": "model", "parts": [{"text": reply}]},
-    ]
-    return { **state, "history": new_history }
+    # ============================================================
+    # STEP 2: HANDLE CLARIFICATION (IF NEEDED)
+    # ============================================================
+    
+    if is_clarification:
+        print("[DEBUG] Handling clarification request...")
+        
+        explain_prompt = f"""
+        The user did not understand the previous question.
+        
+        Previous Question: "{last_ai_msg}"
+        User's Question: "{user_input}"
+        
+        Task:
+        1. Explain the medical device concept clearly and simply.
+        2. Re-state the original question in a friendlier way.
+        
+        CRITICAL OUTPUT RULES:
+        - Speak directly to the user.
+        - Do NOT provide a list of options.
+        - Do NOT say "Here is an explanation". Just explain it.
+        """
+        explanation = llm.invoke(explain_prompt).content
+        return {"messages": [AIMessage(content=explanation)]}
 
-
-def second_node(state: State):
-    """A placeholder for the next step after triage."""
-    print("[Flow] Reached second_node.")
-    reply = "This is the second node, for non-software devices."
-    new_history = state["history"] + [
-        {"role": "user",  "parts": [{"text": state["text"]}]},
-        {"role": "model", "parts": [{"text": reply}]},
-    ]
-    return { **state, "history": new_history }
-
-# ... add other nodes like software_node, invasive_node etc. ...
-
-
-# --- Graph Definition ---
-
-def choose_next(state: State):
+    # ============================================================
+    # STEP 3: EXTRACT DATA (ONLY IF NOT CLARIFICATION)
+    # ============================================================
+    
+    current_facts = {k: getattr(state, k, None) for k in tool_class.model_fields}
+    
+    prompt = f"""
+    TASK: Update the medical device data based on the conversation.
+    
+    CONTEXT:
+    1. Current Known Data: {current_facts}
+    2. The Bot just asked: "{last_ai_msg}"
+    3. The User just answered: "{user_input}"
+    
+    INSTRUCTIONS:
+    - Update fields based strictly on the User's answer.
+    - If the user says "No" or "Yes", apply it ONLY to the field relevant to the Bot's last question.
     """
-    This router checks if triage is
-    done first, then routes to the correct flow.
-    """
-    if state.get("triage_done") is not True:
-        # Triage is not finished, loop back.
-        return "triage_node"
 
-    # Triage is done! Now we can route based on the results.
-    print("[Flow] Routing post-triage.")
-    if state.get("device_type") == "SOFTWARE":
-        # return "software_node" # (You would add this node)
-        return "second_node" # Placeholder
+    try:
+        result = llm.with_structured_output(tool_class).invoke(prompt)
+        extracted_data = result.model_dump(exclude_unset=True, exclude_none=True)
+        
+        if extracted_data:
+            print(f"[DEBUG] Extracted: {extracted_data}")
+            updates.update(extracted_data)
+        else:
+            print(f"[DEBUG] No data extracted.")
+            
+    except Exception as e:
+        print(f"[Extract Error]: {e}")
+
+    # ============================================================
+    # STEP 4: FIND MISSING & ACT
+    # ============================================================
+    
+    missing = None
+    temp_state = state.model_copy(update=updates)
+    
+    for name, info in tool_class.model_fields.items():
+        if getattr(temp_state, name, None) is None:
+            missing = (name, info.description)
+            break
+
+    if missing:
+        name, desc = missing
+        print(f"[DEBUG] Missing field: {name}")
+        
+        # --- FIX IS HERE: STRICT SINGLE OUTPUT ---
+        q_prompt = f"""
+        You are a helpful Medical Device Classification Assistant.
+        You need to collect information about this field: '{name}'
+        Field Description: {desc}
+        
+        Task: Ask the user a SINGLE, clear question to get this information.
+        
+        CRITICAL OUTPUT RULES:
+        - Return ONLY the question text.
+        - Do NOT give options (like "Option 1", "Option 2").
+        - Do NOT add meta-text like "Here is a question".
+        - If it is a Yes/No question, keep it simple.
+        - If it is an Enum (multiple choice), list the options naturally in the sentence.
+        """
+        q = llm.invoke(q_prompt).content
+        
+        # Cleanup: sometimes LLMs still wrap text in quotes or add newlines
+        q_clean = q.strip().replace('"', '')
+        
+        updates["messages"] = [AIMessage(content=q_clean)]
+    
+    elif is_triage:
+        print("[DEBUG] Triage complete.")
+        merged = state.model_copy(update=updates)
+        updates["pending_nodes"] = calculate_pending_nodes(merged)
+        updates["triage_complete"] = True
+        updates["messages"] = [AIMessage(content="✓ Triage complete. Moving to specifics...")]
+    
     else:
-        return "second_node"
+        print(f"[DEBUG] Node {node_name} done.")
+        updates["pending_nodes"] = list(state.pending_nodes[1:]) if state.pending_nodes else []
+        updates["messages"] = [AIMessage(content=f"✓ {node_name} data collected.")]
+
+    return updates
+
+# ============================================================
+# NODES
+# ============================================================
+
+def triage_node(state: State) -> dict:
+    return run_node(state, TriageNode, "triage", is_triage=True)
+
+def invasive_node(state: State) -> dict:
+    return run_node(state, InvasiveNode, "invasive")
+
+def active_node(state: State) -> dict:
+    return run_node(state, ActiveNode, "active")
+
+def software_node(state: State) -> dict:
+    return run_node(state, SoftwareNode, "software")
+
+def classify_node(state: State) -> dict:
+    print("\n[DEBUG] Running Node: CLASSIFY")
+    exclude = {"messages", "pending_nodes", "triage_complete"}
+    facts = {k: v for k, v in state.model_dump().items() if v is not None and k not in exclude}
+    
+    prompt = f"""Classify this medical device according to MDR (EU) 2017/745 Annex VIII.
+
+    Facts gathered:
+    {facts}
+
+    Output format:
+    - **Class**: (I, IIa, IIb, or III)
+    - **Rule**: (Applicable Rule numbers)
+    - **Reasoning**: Brief explanation.
+    """
+
+    response = llm.invoke(prompt)
+    return {"messages": [AIMessage(content=f"📋 CLASSIFICATION REPORT:\n\n{response.content}")]}
+
+
+# ============================================================
+# ROUTER
+# ============================================================
+
+def router(state: State) -> str:
+    if state.messages and isinstance(state.messages[-1], AIMessage):
+        last_msg = state.messages[-1].content
+        if "✓" not in last_msg and "📋" not in last_msg:
+             return END
+
+    if not state.triage_complete:
+        return "triage"
+    if state.pending_nodes:
+        return state.pending_nodes[0]
+    return "classify"
+
+
+# ============================================================
+# GRAPH CONFIG
+# ============================================================
 
 builder = StateGraph(State)
 
-builder.add_node("triage_node", triage_node)
-builder.add_node("second_node", second_node)
-# builder.add_node("software_node", software_node) # etc.
+builder.add_node("triage", triage_node)
+builder.add_node("invasive", invasive_node)
+builder.add_node("active", active_node)
+builder.add_node("software", software_node)
+builder.add_node("classify", classify_node)
 
-builder.set_entry_point("triage_node")
+builder.set_entry_point("triage")
 
-builder.add_conditional_edges(
-    "triage_node",  # Run router AFTER triage_node
-    choose_next,
-    {
-        # If choose_next returns "triage_node", it means we're not done.
-        # We MUST END the graph here to wait for the user's next input.
-        "triage_node": END, 
-        
-        # If choose_next returns "second_node", triage is done.
-        # Go to the second node.
-        "second_node": "second_node",
-        
-        # Add any other nodes you might route to
-        # "software_node": "software_node",
-    }
-)
+ROUTES = {"triage": "triage", "invasive": "invasive", "active": "active", "software": "software", "classify": "classify", END: END}
 
-builder.add_edge("second_node", END) # second_node also ends
-# builder.add_edge("software_node", END)
+builder.add_conditional_edges("triage", router, ROUTES)
+builder.add_conditional_edges("invasive", router, ROUTES)
+builder.add_conditional_edges("active", router, ROUTES)
+builder.add_conditional_edges("software", router, ROUTES)
+builder.add_edge("classify", END)
 
 graph = builder.compile()
 
 
-# --- Main Application Loop ---
-if __name__ == "__main__":
-    
-    # Use the keys from State to build the initial state dynamically
-    initial_state = {key: None for key in State.__annotations__}
-    initial_state.update({
-        "text": "",
-        "history": [],
-        "triage_done": False,
-        "needs_non_invasive_section": False,
-        "needs_invasive_section": False,
-        "needs_active_section": False,
-        "needs_software_section": False,
-        "possible_special_rules": False,
-    })
+# ============================================================
+# MAIN
+# ============================================================
 
-    print("Bot: Hello! I can help you with medical device classification.")
+if __name__ == "__main__":
+    print("🏥 MDR Bot (Strict) | 'exit' = quit | 'state' = show\n")
+    
+    current_state = State()
+    print("Bot: Please describe the medical device you want to classify.\n")
     
     while True:
         try:
-            user_input = input("You: ")
-            if user_input.lower() in ["exit", "quit"]:
+            user_input = input("You: ").strip()
+            
+            if user_input.lower() == "exit":
                 break
-
-            current_state = initial_state.copy()
-            current_state["text"] = user_input
+            if user_input.lower() == "state":
+                print("\n--- CURRENT STATE ---")
+                for k, v in current_state.model_dump().items():
+                    if v not in (None, [], False) and k != "messages":
+                        print(f"{k}: {v}")
+                print("---------------------\n")
+                continue
+            if not user_input:
+                continue
             
-            final_state = graph.invoke(current_state)
+            current_state.messages.append(HumanMessage(content=user_input))
+            result = graph.invoke(current_state)
+            current_state = State(**{k: v for k, v in result.items() if k in State.model_fields})
             
-            model_reply = final_state["history"][-1]["parts"][0]["text"]
-            print(f"Bot: {model_reply}")
-            
-            initial_state = final_state
-            
+            if current_state.messages and isinstance(current_state.messages[-1], AIMessage):
+                print(f"\nBot: {current_state.messages[-1].content}\n")
+                    
         except KeyboardInterrupt:
-            print("\nExiting chat.")
             break
-
-    print("\n--- Final State ---")
-    import json
-    print(json.dumps(final_state, indent=2))
+        except Exception as e:
+            print(f"[Error]: {e}")

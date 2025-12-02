@@ -39,43 +39,13 @@ The records in EUDAMED includes these fields:
 Since similar records from the same company have different basicUdi and different primaryDi it is more interesting to filter searches so that we dont have collections that share the same basicUdi.
 
 
-## The rules graph
+## Dynamisk routing 
+Logik-flöde för Routern:
 
-::: mermaid
-graph TD
-    %% Start och Initial Analys
-    Start((Start)) --> Triage["<b>Triage Node</b><br/>Analysera input<br/>Sätt flaggor: is_active, invasive_type"]
-    
-    Triage --> CheckActive{"<b>Är den Active?</b><br/>(Conditional Edge)"}
+    Input: State.
 
-    %% Active Branch (Rule 9-13)
-    CheckActive -- Ja --> AskActive["<b>Active Questions Node</b><br/>Fråga om energi, mjukvara,<br/>vital monitoring (Rule 9-13)"]
-    CheckActive -- Nej --> CheckInvasive
+    Logik: Är pending_nodes tom?
 
-    %% Koppla Active vidare till Physical (Vattenfall)
-    AskActive --> CheckInvasive{"<b>Vilken Invasiv typ?</b><br/>(Conditional Edge)"}
+        Ja: Gå till classify.
 
-    %% Physical Branches (Rule 1-8)
-    CheckInvasive -- Non-Invasive --> AskNonInv["<b>Non-Invasive Questions Node</b><br/>Fråga om skadad hud,<br/>vätskor etc (Rule 1-4)"]
-    CheckInvasive -- Invasive / Implant --> AskInv["<b>Invasive Questions Node</b><br/>Fråga om duration,<br/>centrala organ (Rule 5-8)"]
-
-    %% Samling vid Special Rules (Rule 14-22)
-    AskNonInv --> AskSpecial
-    AskInv --> AskSpecial
-
-    AskSpecial["<b>Special Rules Node</b><br/>Fråga om nanomaterial,<br/>mediciner etc (Rule 14-22)"]
-
-    %% Final Classification
-    AskSpecial --> Classify["<b>Classifier Node</b><br/>Jämför Active Result vs Physical Result<br/>Högsta klassificering vinner"]
-    
-    Classify --> End((Slut))
-
-    %% Styling
-    classDef logic fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef question fill:#bbf,stroke:#333,stroke-width:2px;
-    classDef result fill:#bfb,stroke:#333,stroke-width:2px;
-
-    class CheckActive,CheckInvasive logic;
-    class AskActive,AskNonInv,AskInv,AskSpecial question;
-    class Classify result;
-:::
+        Nej: Ta första elementet (next_node = list[0]), uppdatera state med pending_nodes = list[1:], och returnera next_node som destination.

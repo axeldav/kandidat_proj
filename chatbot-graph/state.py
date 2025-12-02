@@ -11,6 +11,13 @@ class Duration(str, Enum):
     LONG_TERM = "LONG_TERM"
 
 
+class WoundUseType(str, Enum):
+    BARRIER = "BARRIER"           # mechanical barrier, compression, absorption → Class I
+    DERMIS_BREACH = "DERMIS_BREACH"  # deep wounds, secondary healing → Class IIb
+    MICRO_ENV = "MICRO_ENV"       # manages wound micro-environment → Class IIa
+    OTHER = "OTHER"               # all other cases → Class IIa
+
+
 class State(BaseModel):
     # --- System ---
     messages: Annotated[list, operator.add] = Field(default_factory=list)
@@ -23,6 +30,14 @@ class State(BaseModel):
     is_active: Optional[bool] = None
     is_software: Optional[bool] = None
     duration: Optional[Duration] = None
+
+    # --- Non-Invasive (Rules 2, 3, 4) ---
+    channels_fluids_for_infusion: Optional[bool] = None
+    is_blood_bag: Optional[bool] = None
+    modifies_fluids_for_body: Optional[bool] = None
+    is_simple_processing: Optional[bool] = None
+    contacts_injured_skin: Optional[bool] = None
+    wound_use_type: Optional[WoundUseType] = None
 
     # --- Invasive ---
     is_surgically_invasive: Optional[bool] = None

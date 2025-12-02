@@ -1,3 +1,4 @@
+# app.py
 import os
 import time
 from pydantic import BaseModel
@@ -7,7 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from state import State
 from utils import calculate_pending_nodes
-from tools import TriageNode, InvasiveNode, ActiveNode, SoftwareNode
+from tools import TriageNode, NonInvasiveNode, InvasiveNode, ActiveNode, SoftwareNode
 
 # --- LLM ---
 llm = ChatGoogleGenerativeAI(
@@ -35,9 +36,6 @@ def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triag
     if is_triage and state.triage_complete:
         print(f"[DEBUG] Triage already complete, passing through to router...")
         return {}  # Return empty - don't process input, let router handle it
-    
-    # --- PAUSE TO PREVENT 429 ERRORS (FREE TIER) ---
-    time.sleep(1.0) 
     
     messages = state.messages
     updates = {}
@@ -85,6 +83,7 @@ def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triag
         """
         
         try:
+            time.sleep(2.5)  # Rate limit protection
             intent_result = llm.invoke(intent_prompt).content.strip().upper()
             print(f"[DEBUG] Intent detected: {intent_result}")
             if "CLARIFICATION" in intent_result:
@@ -96,7 +95,7 @@ def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triag
     # --- 3. HANDLE CLARIFICATION (If needed) ---
     if is_clarification:
         print("[DEBUG] Handling clarification request...")
-        time.sleep(1.0) # Safety pause
+        time.sleep(2.5)  # Rate limit protection
         
         explain_prompt = f"""
         The user did not understand the previous question.
@@ -132,7 +131,7 @@ def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triag
         """
 
         try:
-            time.sleep(1.0) # Safety pause before heavy extraction
+            time.sleep(2.5)  # Rate limit protection
             result = llm.with_structured_output(tool_class).invoke(prompt)
             extracted_data = result.model_dump(exclude_unset=True, exclude_none=True)
             
@@ -160,7 +159,7 @@ def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triag
         name, desc = missing
         print(f"[DEBUG] Missing field: {name}")
         
-        time.sleep(1.0) # Safety pause before generation
+        time.sleep(2.5)  # Rate limit protection
         
         q_prompt = f"""
         You are a helpful Medical Device Classification Assistant.
@@ -200,6 +199,9 @@ def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triag
 
 def triage_node(state: State) -> dict:
     return run_node(state, TriageNode, "triage", is_triage=True)
+
+def non_invasive_node(state: State) -> dict:
+    return run_node(state, NonInvasiveNode, "non_invasive")
 
 def invasive_node(state: State) -> dict:
     return run_node(state, InvasiveNode, "invasive")
@@ -276,6 +278,7 @@ def router(state: State) -> str:
 builder = StateGraph(State)
 
 builder.add_node("triage", triage_node)
+builder.add_node("non_invasive", non_invasive_node)
 builder.add_node("invasive", invasive_node)
 builder.add_node("active", active_node)
 builder.add_node("software", software_node)
@@ -283,9 +286,10 @@ builder.add_node("classify", classify_node)
 
 builder.set_entry_point("triage")
 
-ROUTES = {"triage": "triage", "invasive": "invasive", "active": "active", "software": "software", "classify": "classify", END: END}
+ROUTES = {"triage": "triage", "non_invasive": "non_invasive", "invasive": "invasive", "active": "active", "software": "software", "classify": "classify", END: END}
 
 builder.add_conditional_edges("triage", router, ROUTES)
+builder.add_conditional_edges("non_invasive", router, ROUTES)
 builder.add_conditional_edges("invasive", router, ROUTES)
 builder.add_conditional_edges("active", router, ROUTES)
 builder.add_conditional_edges("software", router, ROUTES)

@@ -8,6 +8,8 @@ def calculate_pending_nodes(state) -> List[str]:
     
     if state.is_invasive:
         nodes.append("invasive")
+    elif state.is_invasive is False:
+        nodes.append("non_invasive")
     
     if state.is_active:
         nodes.append("active")

@@ -16,5 +16,7 @@ def calculate_pending_nodes(state) -> List[str]:
     
     if state.is_software:
         nodes.append("software")
+
+    nodes.append("special_rules")
     
     return nodes

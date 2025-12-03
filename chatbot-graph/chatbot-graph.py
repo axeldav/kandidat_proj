@@ -8,7 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from state import State
 from utils import calculate_pending_nodes
-from tools import TriageNode, NonInvasiveNode, InvasiveNode, ActiveNode, SoftwareNode
+from tools import TriageNode, NonInvasiveNode, InvasiveNode, ActiveNode, SoftwareNode, SpecialRulesNode
 
 # --- LLM ---
 llm = ChatGoogleGenerativeAI(
@@ -212,6 +212,9 @@ def active_node(state: State) -> dict:
 def software_node(state: State) -> dict:
     return run_node(state, SoftwareNode, "software")
 
+def special_rules_node(state: State) -> dict:
+    return run_node(state, SpecialRulesNode, "special_rules")
+
 def classify_node(state: State) -> dict:
     print("\n[DEBUG] Running Node: CLASSIFY")
     exclude = {"messages", "pending_nodes", "triage_complete"}
@@ -282,17 +285,19 @@ builder.add_node("non_invasive", non_invasive_node)
 builder.add_node("invasive", invasive_node)
 builder.add_node("active", active_node)
 builder.add_node("software", software_node)
+builder.add_node("special_rules", special_rules_node)
 builder.add_node("classify", classify_node)
 
 builder.set_entry_point("triage")
 
-ROUTES = {"triage": "triage", "non_invasive": "non_invasive", "invasive": "invasive", "active": "active", "software": "software", "classify": "classify", END: END}
+ROUTES = {"triage": "triage", "non_invasive": "non_invasive", "invasive": "invasive", "active": "active", "software": "software", "special_rules": "special_rules", "classify": "classify", END: END}
 
 builder.add_conditional_edges("triage", router, ROUTES)
 builder.add_conditional_edges("non_invasive", router, ROUTES)
 builder.add_conditional_edges("invasive", router, ROUTES)
 builder.add_conditional_edges("active", router, ROUTES)
 builder.add_conditional_edges("software", router, ROUTES)
+builder.add_conditional_edges("special_rules", router, ROUTES)
 builder.add_edge("classify", END)
 
 graph = builder.compile()

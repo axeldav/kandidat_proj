@@ -11,11 +11,11 @@ from utils import calculate_pending_nodes
 from tools import TriageNode, NonInvasiveNode, InvasiveNode, ActiveNode, SoftwareNode, SpecialRulesNode
 
 # --- CONFIG ---
-CALL_DELAY = 4  # Seconds between API calls (increase if still hitting 429s)
+CALL_DELAY = 4  # Seconds between API calls
 
 # --- LLM ---
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-2.0-flash-lite",
     google_api_key=os.environ.get("GEMINI_API_KEY"),
     temperature=0 
 )
@@ -30,6 +30,28 @@ def call_llm(prompt: str, structured_schema: type[BaseModel] | None = None) -> s
     return llm.invoke(prompt).content
 
 
+# --- CONDITIONAL FIELD LOGIC ---
+CONDITIONAL_FIELDS = {
+    # SpecialRulesNode
+    "disinfects_invasive_devices": ("is_disinfecting_device", True),
+    "tissue_contacts_intact_skin_only": ("contains_human_or_animal_tissue", True),
+    "nanomaterial_exposure": ("contains_nanomaterial", True),
+    "inhalation_essential_impact": ("is_inhalation_drug_delivery", True),
+    "substance_systemic_absorption": ("is_substance_absorbed_in_body", True),
+    # InvasiveNode
+    "orifice_location": ("is_surgically_invasive", False),
+    "placed_in_teeth": ("undergoes_chemical_change", True),
+    # ActiveNode
+    "energy_is_hazardous": ("administers_energy", True),
+    "immediate_danger_monitoring": ("monitors_vital_functions", True),
+    "controls_active_implantable": ("controls_other_device", True),
+    # NonInvasiveNode
+    "is_blood_bag": ("channels_fluids_for_infusion", True),
+    "is_simple_processing": ("modifies_fluids_for_body", True),
+    "wound_use_type": ("contacts_injured_skin", True),
+}
+
+
 # ============================================================
 # NODE ENGINE
 # ============================================================
@@ -37,7 +59,6 @@ def call_llm(prompt: str, structured_schema: type[BaseModel] | None = None) -> s
 def run_node(state: State, tool_class: type[BaseModel], node_name: str, is_triage: bool = False) -> dict:
     print(f"\n[DEBUG] Running Node: {node_name.upper()}") 
     
-    # Skip triage if already done
     if is_triage and state.triage_complete:
         print(f"[DEBUG] Triage complete, passing to router...")
         return {}
@@ -104,7 +125,8 @@ Rules:
 
         try:
             result = call_llm(extract_prompt, structured_schema=tool_class)
-            extracted = result.model_dump(exclude_unset=True, exclude_none=True)
+            # Changed: removed exclude_unset to capture all values
+            extracted = result.model_dump(exclude_none=True)
             if extracted:
                 print(f"[DEBUG] Extracted: {extracted}")
                 updates.update(extracted)
@@ -112,29 +134,63 @@ Rules:
             print(f"[Extract Error]: {e}")
 
     # --- 5. FIND NEXT MISSING FIELD ---
-    temp_state = state.model_copy(update=updates)
+    # Merge updates with current state
+    merged_data = state.model_dump()
+    merged_data.update(updates)
+    temp_state = State(**{k: v for k, v in merged_data.items() if k in State.model_fields})
+    
     missing = None
     
     for name, info in tool_class.model_fields.items():
-        if getattr(temp_state, name, None) is None:
-            missing = (name, info.description)
-            break
+        current_value = getattr(temp_state, name, None)
+        
+        # Skip if already filled
+        if current_value is not None:
+            continue
+            
+        # Check if this is a conditional field
+        if name in CONDITIONAL_FIELDS:
+            parent_field, required_value = CONDITIONAL_FIELDS[name]
+            parent_value = getattr(temp_state, parent_field, None)
+            
+            print(f"[DEBUG] Checking conditional: {name} (parent {parent_field}={parent_value}, required={required_value})")
+            
+            # Skip if parent hasn't been answered yet
+            if parent_value is None:
+                print(f"[DEBUG] Skipping {name}: parent not answered yet")
+                continue
+            
+            # Skip if parent doesn't match required value
+            if parent_value != required_value:
+                print(f"[DEBUG] Skipping {name}: parent={parent_value}, needed={required_value}")
+                continue
+        
+        missing = (name, info.description)
+        break
 
     if missing:
         name, desc = missing
         print(f"[DEBUG] Missing: {name}")
         
-        q_prompt = f"""Ask ONE clear question about: '{name}'
-Description: {desc}
+        device_name = temp_state.device_name or "the device"
+        
+        q_prompt = f"""You are a medical device classification assistant helping classify "{device_name}".
 
-Return only the question. No options, bullets, or extra text."""
+You need to find out: {desc}
+
+Ask ONE simple question about the {device_name} to determine this.
+- Use plain language a manufacturer would understand
+- Ask specifically about what the description says
+- Do NOT ask generic questions like "is it used inside the body"
+
+Return only the question, nothing else."""
         
         question = call_llm(q_prompt).strip().replace('"', '')
         updates["messages"] = [AIMessage(content=question)]
     
     elif is_triage:
         print("[DEBUG] Triage complete.")
-        merged = state.model_copy(update=updates)
+        merged = State(**{k: v for k, v in {**state.model_dump(), **updates}.items() if k in State.model_fields})
         updates["pending_nodes"] = calculate_pending_nodes(merged)
         updates["triage_complete"] = True
         updates["messages"] = [AIMessage(content="✓ Triage complete. Moving to specifics...")]
@@ -195,7 +251,6 @@ def router(state: State) -> str:
     if state.messages and isinstance(state.messages[-1], AIMessage):
         last_msg = state.messages[-1].content
         
-        # Question asked -> stop and wait for user
         if "✓" not in last_msg and "📋" not in last_msg:
             print("[DEBUG] Router: Question -> END")
             return END

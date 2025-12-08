@@ -388,7 +388,7 @@ def main():
     # CONFIGURATION - Modify these values as needed
     # ============================================================
     INPUT_FILE = "eudamed_devices.json"
-    RISK_CLASS = "iia"  # Options: 'i', 'iia', 'iib', 'iii', 'a', 'b', 'c', 'd', or None for all
+    RISK_CLASS = "iii"  # Options: 'i', 'iia', 'iib', 'iii', 'a', 'b', 'c', 'd', or None for all
     AMOUNT = 5          # Number of devices to fetch
     SLEEP_SECONDS = 1.0 # Delay between API calls (be nice to the server)
     # ============================================================

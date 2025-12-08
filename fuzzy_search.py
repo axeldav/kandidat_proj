@@ -134,7 +134,7 @@ def main():
     config = {
         "output_file": "eudamed_devices.json",
         "start_page": 1,
-        "end_page": 20,      # None = fetch all pages, or set a specific number
+        "end_page": 60,      # None = fetch all pages, or set a specific number
         "page_size": 300,
         "sleep_seconds": 3,    # Be nice to the API
     }
